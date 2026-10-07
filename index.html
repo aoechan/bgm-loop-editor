@@ -130,7 +130,7 @@ footer{padding:4px 2px 18px}
     </div>
     <pre id="json" class="mono hint" style="white-space:pre-wrap;margin:8px 0 0"></pre>
   </div>
-  <footer class="hint" data-i="privacy"></footer>
+  <footer class="hint"><div data-i="privacy"></div><div data-i="rights" style="margin-top:6px"></div><div style="margin-top:6px"><a href="https://github.com/aoechan/bgm-loop-editor" style="color:var(--dim)">GitHub</a></div></footer>
 </main>
 
 <script>
@@ -152,6 +152,7 @@ const I18N = {
     exportWav: 'WAVで書き出す（イントロ／ループ）', exportJson: '設定をJSONで保存', copyJson: '設定をコピー',
     exportHint: 'イントロは1回だけ、ループはそのまま繰り返せばつながります（重ねは焼き込み済み）。JSONにはテンポとループの位置が入ります。',
     privacy: '登録不要・インストール不要。曲の読み込み、解析、再生、書き出しはすべてこのブラウザの中だけで行い、ファイルはどこにも送信しません（通信は、このページを開くときの1回だけ）。つなぎ目の設定は、このブラウザの中にだけ保存されます。',
+    rights: 'このツールで作ったファイルの権利は、元の曲の権利のままです。このツールやその作者が、あなたの曲やループに何かの権利を主張したり、利用に条件を付けたりすることはありません。書き出したループは、ゲームへの組み込みや販売を含めて自由に使えます（元の曲の利用許諾の範囲で）。ツール本体はMITライセンスです。',
     loading: '読み込み中…', estimating: 'テンポを推定中…', copied: '設定をコピーしました', copyFail: 'コピーできませんでした（JSONで保存を使ってください）',
     decodeFail: 'この形式は、このブラウザでは読み込めませんでした', pos: '再生位置', barN: '小節目', loopLen: 'ループの長さ', barsUnit: '小節'
   },
@@ -172,6 +173,7 @@ const I18N = {
     exportWav: 'Export WAV (intro / loop)', exportJson: 'Save settings as JSON', copyJson: 'Copy settings',
     exportHint: 'Play the intro once, then repeat the loop as-is (the crossfade is baked in). The JSON holds the tempo and loop points.',
     privacy: 'No sign-up, no install. Loading, analysis, playback and export all happen inside this browser; your files are never uploaded anywhere (the only network request is opening this page). Loop settings are saved only in this browser.',
+    rights: 'Files you make with this tool keep the rights of the original track. Neither this tool nor its author claims any rights over your music or loops, or puts any conditions on how you use them. You are free to use the exported loops, including in games you sell (within the license of the original track). The tool itself is MIT licensed.',
     loading: 'Loading…', estimating: 'Estimating tempo…', copied: 'Settings copied', copyFail: 'Could not copy (use “Save settings as JSON”)',
     decodeFail: 'This browser could not decode this file', pos: 'Position', barN: '', loopLen: 'Loop length', barsUnit: 'bars'
   }
