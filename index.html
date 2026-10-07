@@ -1,0 +1,457 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="description" content="Pick a seamless BGM loop point by ear while looking at the waveform, then export intro / loop WAV. Runs entirely in your browser; your files are never uploaded.">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>BGM Loop Editor</title>
+<style>
+:root{--bg:#141019;--panel:#1f1828;--line:#3a2f47;--text:#efe8f5;--dim:#a79cb4;--acc:#ff4fb0;--start:#3ddc84;--end:#ff5a5a}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:14px/1.5 system-ui,"Segoe UI","Hiragino Sans","Yu Gothic UI",sans-serif}
+header{padding:14px 20px;border-bottom:1px solid var(--line);display:flex;gap:12px 16px;align-items:center;flex-wrap:wrap}
+h1{font-size:18px;margin:0;font-weight:700}
+.hint{color:var(--dim);font-size:13px}
+.lang{margin-left:auto;display:flex;gap:4px}
+main{padding:16px 20px;display:grid;gap:14px;max-width:1500px;margin:0 auto}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px 14px}
+.row{display:flex;gap:8px 10px;align-items:center;flex-wrap:wrap}
+button{background:#2c2238;color:var(--text);border:1px solid #4d3e60;border-radius:7px;padding:6px 11px;font:inherit;cursor:pointer;touch-action:manipulation}
+button:hover{border-color:var(--acc)}
+button.primary{background:var(--acc);border-color:var(--acc);color:#1a0812;font-weight:700}
+button.on{background:#4a2f5e;border-color:var(--acc)}
+input[type=number]{width:96px;background:#120d18;color:var(--text);border:1px solid #4d3e60;border-radius:6px;padding:4px 6px;font:inherit}
+select{background:#120d18;color:var(--text);border:1px solid #4d3e60;border-radius:6px;padding:4px 6px;font:inherit}
+label{color:var(--dim)}
+canvas{display:block;width:100%;background:#0d0a12;border-radius:8px;cursor:crosshair;touch-action:none}
+#drop{border:2px dashed #4d3e60;border-radius:10px;padding:18px;text-align:center;color:var(--dim)}
+#drop.over{border-color:var(--acc);color:var(--text)}
+.files{display:flex;gap:6px;flex-wrap:wrap}
+.files button{font-size:13px}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.tag{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:4px;vertical-align:middle}
+.cands button{display:block;width:100%;text-align:left;margin:3px 0}
+kbd{background:#2c2238;border:1px solid #4d3e60;border-radius:4px;padding:0 5px;font-size:12px}
+.mono{font-family:Consolas,Menlo,monospace}
+#status{color:var(--dim)}
+footer{padding:4px 2px 18px}
+@media (max-width:900px){.grid2{grid-template-columns:1fr}}
+@media (max-width:700px){
+  header,main{padding-left:12px;padding-right:12px}
+  button{padding:9px 12px;font-size:15px}
+  .nudge button{flex:1 1 30%}
+  .kbd{display:none}
+}
+</style>
+</head>
+<body>
+<header>
+  <h1 data-i="title"></h1>
+  <span class="hint" data-i="steps"></span>
+  <div class="lang"><button data-lang="ja">日本語</button><button data-lang="en">English</button></div>
+</header>
+<main>
+  <div class="panel">
+    <div id="drop"><span data-i="drop"></span> <button id="pick" data-i="pick"></button><input id="file" type="file" accept="audio/*,.mp3,.wav,.ogg,.m4a,.flac" multiple hidden></div>
+    <div class="files" id="files" style="margin-top:8px"></div>
+    <div id="status" style="margin-top:6px"></div>
+  </div>
+
+  <div class="panel">
+    <div class="row">
+      <button class="primary" id="playAll" data-i="playAll"></button>
+      <button class="primary" id="playSeam" data-i="playSeam"></button>
+      <label><span data-i="preroll"></span> <select id="preroll"><option value="1">1</option><option value="2" selected>2</option><option value="4">4</option><option value="8">8</option></select> <span data-i="bars"></span></label>
+      <button id="stop" data-i="stop"></button>
+      <span class="hint kbd"><kbd>Space</kbd> <span data-i="spaceHint"></span></span>
+      <label><span data-i="volume"></span> <input id="vol" type="range" min="0" max="1" step="0.01" value="0.8"></label>
+      <span id="pos" class="mono"></span>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="hint" style="margin-bottom:6px" data-i="overviewHint"></div>
+    <canvas id="ov" height="150"></canvas>
+  </div>
+
+  <div class="grid2">
+    <div class="panel">
+      <div class="row" style="justify-content:space-between"><span><span class="tag" style="background:var(--end)"></span><span data-i="endNear"></span></span><span class="mono" id="endLbl"></span></div>
+      <canvas id="endView" height="140"></canvas>
+      <div class="row nudge" style="margin-top:6px">
+        <button data-m="end" data-d="-bar" data-i="mBar"></button><button data-m="end" data-d="-beat" data-i="mBeat"></button><button data-m="end" data-d="-0.01">−10ms</button>
+        <button data-m="end" data-d="0.01">+10ms</button><button data-m="end" data-d="beat" data-i="pBeat"></button><button data-m="end" data-d="bar" data-i="pBar"></button>
+        <span><input type="number" id="endNum" step="0.001"> <span data-i="sec"></span></span>
+      </div>
+    </div>
+    <div class="panel">
+      <div class="row" style="justify-content:space-between"><span><span class="tag" style="background:var(--start)"></span><span data-i="startNear"></span></span><span class="mono" id="startLbl"></span></div>
+      <canvas id="startView" height="140"></canvas>
+      <div class="row nudge" style="margin-top:6px">
+        <button data-m="start" data-d="-bar" data-i="mBar"></button><button data-m="start" data-d="-beat" data-i="mBeat"></button><button data-m="start" data-d="-0.01">−10ms</button>
+        <button data-m="start" data-d="0.01">+10ms</button><button data-m="start" data-d="beat" data-i="pBeat"></button><button data-m="start" data-d="bar" data-i="pBar"></button>
+        <span><input type="number" id="startNum" step="0.001"> <span data-i="sec"></span></span>
+      </div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="hint" style="margin-bottom:6px" data-i="seamHint"></div>
+    <canvas id="seam" height="110"></canvas>
+  </div>
+
+  <div class="grid2">
+    <div class="panel">
+      <div class="row">
+        <label><span data-i="tempo"></span> <input type="number" id="bpm" step="0.01"> BPM</label>
+        <label><span data-i="firstBeat"></span> <input type="number" id="offset" step="0.001"> <span data-i="sec"></span></label>
+        <label><span data-i="bpbA"></span> <select id="bpb"><option>3</option><option selected>4</option><option>6</option></select> <span data-i="bpbB"></span></label>
+        <button id="autoTempo" data-i="autoTempo"></button>
+      </div>
+      <div class="row" style="margin-top:8px">
+        <label data-i="snapLbl"></label>
+        <button class="snap on" data-s="bar" data-i="snapBar"></button><button class="snap" data-s="beat" data-i="snapBeat"></button><button class="snap" data-s="off" data-i="snapOff"></button>
+        <label><span data-i="xf"></span> <input type="number" id="xf" step="1" min="0" value="20"> ms</label>
+      </div>
+      <div class="hint" style="margin-top:6px" data-i="tempoHint"></div>
+    </div>
+    <div class="panel">
+      <div class="row"><button id="autoLoop" data-i="autoLoop"></button><span class="hint" data-i="autoLoopHint"></span></div>
+      <div class="cands" id="cands"></div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="row">
+      <button class="primary" id="exportWav" data-i="exportWav"></button>
+      <button id="exportJson" data-i="exportJson"></button>
+      <button id="copyJson" data-i="copyJson"></button>
+      <span class="hint" data-i="exportHint"></span>
+    </div>
+    <pre id="json" class="mono hint" style="white-space:pre-wrap;margin:8px 0 0"></pre>
+  </div>
+  <footer class="hint" data-i="privacy"></footer>
+</main>
+
+<script>
+const I18N = {
+  ja: {
+    title: 'BGMループ編集',
+    steps: '曲を入れる → テンポを合わせる → 緑＝ループの始まり・赤＝ループの終わりを動かす → 「つなぎ目を聞く」で確認 → 書き出し',
+    drop: 'ここに曲のファイル（mp3 / wav / ogg）をドロップ、または', pick: 'ファイルを選ぶ',
+    playAll: '▶ 頭から再生（ループする）', playSeam: '▶ つなぎ目を聞く', preroll: 'つなぎ目の前から', bars: '小節', stop: '■ 止める',
+    spaceHint: 'つなぎ目を聞く／止める', volume: '音量',
+    overviewHint: '全体（印をドラッグで動かす。何もないところをタップ／クリックすると、そこから再生）',
+    endNear: 'ループの終わり付近', startNear: 'ループの始まり付近',
+    mBar: '−1小節', mBeat: '−1拍', pBeat: '+1拍', pBar: '+1小節', sec: '秒',
+    seamHint: 'つなぎ目（ループの終わりの1小節 ｜ ループの始まりの1小節）。波の形が自然につながっていれば、音もつながりやすい',
+    tempo: 'テンポ', firstBeat: '最初の拍', bpbA: '1小節', bpbB: '拍', autoTempo: 'テンポを自動で推定',
+    snapLbl: '印の吸着', snapBar: '小節', snapBeat: '拍', snapOff: 'なし', xf: '重ね（クロスフェード）',
+    tempoHint: 'テンポと最初の拍が合っていると、縦の線（明るい線＝小節の頭）が曲の拍に重なります。重ねは、つなぎ目のプツッという音を消すためのもので、普段は10〜30msで十分です。',
+    autoLoop: 'つなぎ目の候補を自動で探す', autoLoopHint: '似た小節同士の組み合わせ（あくまで候補。最後は耳で決める）', searching: '探しています…',
+    exportWav: 'WAVで書き出す（イントロ／ループ）', exportJson: '設定をJSONで保存', copyJson: '設定をコピー',
+    exportHint: 'イントロは1回だけ、ループはそのまま繰り返せばつながります（重ねは焼き込み済み）。JSONにはテンポとループの位置が入ります。',
+    privacy: '登録不要・インストール不要。曲の読み込み、解析、再生、書き出しはすべてこのブラウザの中だけで行い、ファイルはどこにも送信しません（通信は、このページを開くときの1回だけ）。つなぎ目の設定は、このブラウザの中にだけ保存されます。',
+    loading: '読み込み中…', estimating: 'テンポを推定中…', copied: '設定をコピーしました', copyFail: 'コピーできませんでした（JSONで保存を使ってください）',
+    decodeFail: 'この形式は、このブラウザでは読み込めませんでした', pos: '再生位置', barN: '小節目', loopLen: 'ループの長さ', barsUnit: '小節'
+  },
+  en: {
+    title: 'BGM Loop Editor',
+    steps: 'Load a track → match the tempo → move green = loop start / red = loop end → check with “Hear the seam” → export',
+    drop: 'Drop a music file (mp3 / wav / ogg) here, or', pick: 'Choose file',
+    playAll: '▶ Play from start (loops)', playSeam: '▶ Hear the seam', preroll: 'Start', bars: 'bars before the seam', stop: '■ Stop',
+    spaceHint: 'hear the seam / stop', volume: 'Volume',
+    overviewHint: 'Whole track (drag a marker to move it; tap / click an empty spot to play from there)',
+    endNear: 'Around the loop end', startNear: 'Around the loop start',
+    mBar: '−1 bar', mBeat: '−1 beat', pBeat: '+1 beat', pBar: '+1 bar', sec: 's',
+    seamHint: 'The seam (last bar before the loop end | first bar after the loop start). If the waveforms flow into each other, the audio usually does too.',
+    tempo: 'Tempo', firstBeat: 'First beat', bpbA: 'Bar =', bpbB: 'beats', autoTempo: 'Estimate tempo',
+    snapLbl: 'Snap markers to', snapBar: 'Bar', snapBeat: 'Beat', snapOff: 'Off', xf: 'Crossfade',
+    tempoHint: 'When tempo and first beat are right, the vertical lines (bright = bar start) sit on the beats. The crossfade only removes the click at the seam; 10–30 ms is usually enough.',
+    autoLoop: 'Find seam candidates', autoLoopHint: 'Pairs of similar-sounding bars (just suggestions — trust your ears)', searching: 'Searching…',
+    exportWav: 'Export WAV (intro / loop)', exportJson: 'Save settings as JSON', copyJson: 'Copy settings',
+    exportHint: 'Play the intro once, then repeat the loop as-is (the crossfade is baked in). The JSON holds the tempo and loop points.',
+    privacy: 'No sign-up, no install. Loading, analysis, playback and export all happen inside this browser; your files are never uploaded anywhere (the only network request is opening this page). Loop settings are saved only in this browser.',
+    loading: 'Loading…', estimating: 'Estimating tempo…', copied: 'Settings copied', copyFail: 'Could not copy (use “Save settings as JSON”)',
+    decodeFail: 'This browser could not decode this file', pos: 'Position', barN: '', loopLen: 'Loop length', barsUnit: 'bars'
+  }
+};
+const $ = id => document.getElementById(id);
+const store = { get(k) { try { return JSON.parse(localStorage.getItem(k)); } catch (e) { return null; } }, set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} } };
+let lang = store.get('bgmloop:lang') || ((navigator.language || 'en').toLowerCase().startsWith('ja') ? 'ja' : 'en');
+const T = k => I18N[lang][k] ?? k;
+function applyLang() {
+  document.documentElement.lang = lang;
+  document.title = T('title');
+  document.querySelectorAll('[data-i]').forEach(e => e.textContent = T(e.dataset.i));
+  document.querySelectorAll('[data-lang]').forEach(b => b.classList.toggle('on', b.dataset.lang === lang));
+  if (buf) { rerender(); $('status').textContent = statusLine(); }
+}
+document.querySelectorAll('[data-lang]').forEach(b => b.onclick = () => { lang = b.dataset.lang; store.set('bgmloop:lang', lang); applyLang(); });
+
+let ctx = null, buf = null, fileName = '', files = [], rendered = null, src = null, gain = null;
+let st = { bpm: 150, offset: 0, bpb: 4, start: 0, end: 0, xf: 20, snap: 'bar' };
+let play = null, analysis = null;
+
+const beat = () => 60 / st.bpm, bar = () => beat() * st.bpb;
+const fmt = t => { if (!isFinite(t)) return '-'; const m = Math.floor(t / 60), s = t - m * 60; return `${m}:${s.toFixed(3).padStart(6, '0')}`; };
+const barNo = t => (t - st.offset) / bar() + 1;
+const barTxt = t => lang === 'ja' ? `${barNo(t).toFixed(2)}${T('barN')}` : `bar ${barNo(t).toFixed(2)}`;
+const statusLine = () => `${fileName}: ${fmt(buf.duration)} (${buf.sampleRate} Hz)`;
+function snap(t) { if (st.snap === 'off') return t; const u = st.snap === 'bar' ? bar() : beat(); return st.offset + Math.round((t - st.offset) / u) * u; }
+const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
+const key = () => 'bgmloop:' + fileName + ':' + (buf ? buf.length : 0);
+
+// ---------- files ----------
+$('pick').onclick = () => $('file').click();
+$('file').onchange = e => addFiles([...e.target.files]);
+const drop = $('drop');
+['dragenter', 'dragover'].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.add('over'); }));
+['dragleave', 'drop'].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.remove('over'); }));
+drop.addEventListener('drop', e => addFiles([...e.dataTransfer.files]));
+document.addEventListener('dragover', e => e.preventDefault());
+document.addEventListener('drop', e => { e.preventDefault(); if (e.target !== drop) addFiles([...e.dataTransfer.files]); });
+function addFiles(list) {
+  list = list.filter(f => f.type.startsWith('audio') || /\.(mp3|wav|ogg|m4a|flac)$/i.test(f.name));
+  if (!list.length) return;
+  files.push(...list); renderFileList(); openFile(list[0]);
+}
+function renderFileList() {
+  $('files').innerHTML = '';
+  files.forEach(f => { const b = document.createElement('button'); b.textContent = f.name; if (f.name === fileName) b.classList.add('on'); b.onclick = () => openFile(f); $('files').appendChild(b); });
+}
+async function openFile(f) { await loadArrayBuffer(await f.arrayBuffer(), f.name); }
+async function loadArrayBuffer(ab, name) {
+  stop();
+  ctx = ctx || new (window.AudioContext || window.webkitAudioContext)();
+  if (!gain) { gain = ctx.createGain(); gain.connect(ctx.destination); gain.gain.value = +$('vol').value; }
+  $('status').textContent = T('loading');
+  try { buf = await ctx.decodeAudioData(ab.slice(0)); } catch (e) { $('status').textContent = T('decodeFail'); return; }
+  fileName = name; renderFileList();
+  analysis = null; $('cands').innerHTML = '';
+  const saved = store.get(key());
+  if (saved) Object.assign(st, saved);
+  else {
+    st.start = 0; st.end = buf.duration; st.xf = 20;
+    $('status').textContent = T('estimating');
+    await analyze(); autoTempo();
+    st.start = snap(Math.min(buf.duration * 0.06, 16 * bar())); st.end = snap(buf.duration * 0.88);
+  }
+  syncInputs(); rerender();
+  $('status').textContent = statusLine();
+}
+
+// ---------- analysis (onset flux + band spectrum on an 11 kHz mono copy) ----------
+function fft(re, im) {
+  const n = re.length;
+  for (let i = 1, j = 0; i < n; i++) { let bit = n >> 1; for (; j & bit; bit >>= 1) j ^= bit; j ^= bit; if (i < j) { [re[i], re[j]] = [re[j], re[i]]; [im[i], im[j]] = [im[j], im[i]]; } }
+  for (let len = 2; len <= n; len <<= 1) {
+    const a = -2 * Math.PI / len, wr = Math.cos(a), wi = Math.sin(a);
+    for (let i = 0; i < n; i += len) { let cr = 1, ci = 0;
+      for (let k = 0; k < len / 2; k++) { const h = i + k + len / 2, ur = re[i + k], ui = im[i + k], vr = re[h] * cr - im[h] * ci, vi = re[h] * ci + im[h] * cr;
+        re[i + k] = ur + vr; im[i + k] = ui + vi; re[h] = ur - vr; im[h] = ui - vi; const nr = cr * wr - ci * wi; ci = cr * wi + ci * wr; cr = nr; } }
+  }
+}
+async function analyze() {
+  const sr = 11025, oc = new OfflineAudioContext(1, Math.ceil(buf.duration * sr), sr);
+  const s = oc.createBufferSource(); s.buffer = buf; s.connect(oc.destination); s.start();
+  const x = (await oc.startRendering()).getChannelData(0);
+  const N = 1024, hop = 256, nf = Math.floor((x.length - N) / hop), B = 32;
+  const win = new Float32Array(N).map((_, i) => 0.5 - 0.5 * Math.cos(2 * Math.PI * i / N));
+  const edges = Array.from({ length: B + 1 }, (_, k) => Math.round(2 * Math.pow(400 / 2, k / B)));
+  const spec = new Float32Array(nf * B), flux = new Float32Array(nf);
+  const re = new Float32Array(N), im = new Float32Array(N); const prev = new Float32Array(B);
+  for (let f = 0; f < nf; f++) {
+    for (let i = 0; i < N; i++) { re[i] = x[f * hop + i] * win[i]; im[i] = 0; }
+    fft(re, im);
+    let fl = 0;
+    for (let b = 0; b < B; b++) { let e = 0; for (let k = edges[b]; k < Math.max(edges[b] + 1, edges[b + 1]); k++) e += Math.hypot(re[k], im[k]);
+      const v = Math.log1p(e); spec[f * B + b] = v; fl += Math.max(0, v - prev[b]); prev[b] = v; }
+    flux[f] = fl;
+    if (f % 2000 === 0) await new Promise(r => setTimeout(r));
+  }
+  let m = 0; flux.forEach(v => m += v); m /= nf; for (let f = 0; f < nf; f++) flux[f] = Math.max(0, flux[f] - m);
+  analysis = { sr, hop, nf, B, spec, flux, fr: sr / hop };
+}
+function autoTempo() {
+  if (!analysis) return;
+  const { flux, nf, fr } = analysis;
+  let best = [-1, 120, 0];
+  const scan = (lo, hi, step) => { for (let bpm = lo; bpm <= hi; bpm += step) { let c = 0, s = 0; const w = 2 * Math.PI * bpm / 60 / fr;
+      for (let f = 0; f < nf; f++) { c += flux[f] * Math.cos(w * f); s += flux[f] * Math.sin(w * f); }
+      const z = Math.hypot(c, s); if (z > best[0]) best = [z, bpm, Math.atan2(s, c)]; } };
+  scan(80, 200, 0.25); const b0 = best[1]; scan(b0 - 0.5, b0 + 0.5, 0.01);
+  st.bpm = +best[1].toFixed(2);
+  st.offset = +((((-best[2]) / (2 * Math.PI)) % 1 + 1) % 1 * 60 / st.bpm).toFixed(3);
+}
+function autoLoop() {
+  if (!analysis) return;
+  const { spec, B, fr, nf } = analysis, nb = Math.floor((buf.duration - st.offset) / bar());
+  const F = [];
+  for (let i = 0; i < nb; i++) { const a = Math.floor((st.offset + i * bar()) * fr), z = Math.min(nf, Math.floor((st.offset + (i + 1) * bar()) * fr));
+    const v = new Float32Array(B); for (let f = a; f < z; f++) for (let b = 0; b < B; b++) v[b] += spec[f * B + b];
+    let mu = 0; v.forEach(q => mu += q); mu /= B; let n = 0; for (let b = 0; b < B; b++) { v[b] -= mu; n += v[b] * v[b]; } n = Math.sqrt(n) || 1; for (let b = 0; b < B; b++) v[b] /= n; F.push(v); }
+  const dot = (p, q) => { let s = 0; for (let b = 0; b < B; b++) s += p[b] * q[b]; return s; };
+  const out = [];
+  for (let A = 1; A < nb * 0.4; A++) for (let L = 16; A + L + 4 < nb; L += 8) {
+    let s = 0, n = 0; for (let k = -2; k <= 3; k++) if (A + k >= 0) { s += dot(F[A + k], F[A + L + k]); n++; }
+    out.push({ s: s / n, A, L });
+  }
+  out.sort((p, q) => q.s - p.s);
+  const pick = []; for (const c of out) { if (pick.length >= 10) break; if (pick.every(p => Math.abs(p.A - c.A) > 2 || p.L !== c.L)) pick.push(c); }
+  $('cands').innerHTML = '';
+  pick.forEach(c => { const b = document.createElement('button');
+    const a = st.offset + c.A * bar(), e = a + c.L * bar();
+    b.innerHTML = `<span class="mono">${(c.s * 100).toFixed(1)}%</span>　${c.L} ${T('barsUnit')}　${fmt(a)} → ${fmt(e)}`;
+    b.onclick = () => { st.start = a; st.end = e; changed(); };
+    $('cands').appendChild(b); });
+}
+
+// ---------- looped buffer (intro + body with the tail crossfaded into the head) ----------
+function buildRendered() {
+  if (!buf) return;
+  const sr = buf.sampleRate, ia = Math.round(st.start * sr), ib = Math.round(st.end * sr), xf = Math.max(0, Math.min(Math.round(st.xf / 1000 * sr), ib - ia, buf.length - ib));
+  rendered = ctx.createBuffer(buf.numberOfChannels, ib, sr);
+  for (let c = 0; c < buf.numberOfChannels; c++) {
+    const s = buf.getChannelData(c), d = rendered.getChannelData(c);
+    d.set(s.subarray(0, ib));
+    for (let i = 0; i < xf; i++) { const w = i / xf; d[ia + i] = s[ia + i] * w + s[ib + i] * (1 - w); }
+  }
+}
+
+// ---------- playback ----------
+function startAt(o) {
+  stop(); if (!buf) return;
+  if (ctx.state === 'suspended') ctx.resume();
+  buildRendered();
+  src = ctx.createBufferSource(); src.buffer = rendered; src.loop = true; src.loopStart = st.start; src.loopEnd = st.end;
+  src.connect(gain); const t0 = ctx.currentTime + 0.03; const o2 = clamp(o, 0, st.end - 0.001); src.start(t0, o2);
+  play = { t0, o: o2 };
+}
+function stop() { if (src) { try { src.stop(); } catch (e) {} src.disconnect(); src = null; } play = null; }
+function nowPos() { if (!play) return null; let p = play.o + Math.max(0, ctx.currentTime - play.t0); const L = st.end - st.start; if (p >= st.end) p = st.start + ((p - st.start) % L); return p; }
+$('playAll').onclick = () => startAt(0);
+$('playSeam').onclick = () => startAt(Math.max(0, st.end - (+$('preroll').value) * bar()));
+$('stop').onclick = stop;
+$('vol').oninput = e => { if (gain) gain.gain.value = +e.target.value; };
+document.addEventListener('keydown', e => { if (e.code === 'Space' && e.target.tagName !== 'INPUT') { e.preventDefault(); play ? stop() : $('playSeam').click(); } });
+
+// ---------- drawing ----------
+function setupCanvas(c) { const r = c.getBoundingClientRect(), d = devicePixelRatio || 1; c.width = Math.max(1, Math.round(r.width * d)); c.height = Math.round(c.getAttribute('height') * d); c.style.height = c.getAttribute('height') + 'px'; return c.getContext('2d'); }
+const css = v => getComputedStyle(document.body).getPropertyValue(v);
+function drawWave(g, w, h, t0, t1) {
+  const sr = buf.sampleRate, d0 = buf.getChannelData(0), d1 = buf.numberOfChannels > 1 ? buf.getChannelData(1) : d0, dpr = devicePixelRatio || 1;
+  g.fillStyle = '#0d0a12'; g.fillRect(0, 0, w, h);
+  const X = t => (t - t0) / (t1 - t0) * w;
+  g.fillStyle = 'rgba(255,79,176,.08)'; g.fillRect(X(st.start), 0, X(st.end) - X(st.start), h);
+  const bt = beat(), fb = Math.ceil((t0 - st.offset) / bt), lb = Math.floor((t1 - st.offset) / bt), px = w / ((t1 - t0) / bt);
+  for (let k = fb; k <= lb; k++) { const isBar = ((k % st.bpb) + st.bpb) % st.bpb === 0; if (!isBar && px < 6) continue;
+    g.fillStyle = isBar ? 'rgba(160,140,190,.55)' : 'rgba(100,85,120,.35)'; g.fillRect(Math.round(X(st.offset + k * bt)), 0, 1, h);
+    if (isBar && px * st.bpb > 34 * dpr) { g.fillStyle = 'rgba(200,185,220,.7)'; g.font = `${10 * dpr}px system-ui`; g.fillText(String(k / st.bpb + 1), X(st.offset + k * bt) + 3, 11 * dpr); } }
+  g.fillStyle = '#c9a6ff';
+  const spp = (t1 - t0) * sr / w;
+  for (let x = 0; x < w; x++) { const a = Math.max(0, Math.floor(t0 * sr + x * spp)), z = Math.min(buf.length, Math.floor(t0 * sr + (x + 1) * spp) + 1);
+    if (z <= a) continue; let mn = 1, mx = -1; const step = Math.max(1, Math.floor((z - a) / 64));
+    for (let i = a; i < z; i += step) { const v = (d0[i] + d1[i]) / 2; if (v < mn) mn = v; if (v > mx) mx = v; }
+    g.fillRect(x, h / 2 - mx * h * 0.46, 1, Math.max(1, (mx - mn) * h * 0.46)); }
+  const mark = (t, col) => { const x = X(t); if (x < -2 || x > w + 2) return; g.fillStyle = col; g.fillRect(x - 1, 0, 3, h); g.beginPath(); g.moveTo(x - 8 * dpr, 0); g.lineTo(x + 8 * dpr, 0); g.lineTo(x, 11 * dpr); g.fill(); };
+  mark(st.start, css('--start')); mark(st.end, css('--end'));
+}
+const views = {};
+function viewRange(id) { if (id === 'ov') return [0, buf.duration]; const c = id === 'endView' ? st.end : st.start, r = 2 * bar(); return [c - r, c + r]; }
+function rerender() {
+  if (!buf) return;
+  for (const id of ['ov', 'endView', 'startView']) { const c = $(id), g = setupCanvas(c); const [a, b] = viewRange(id); drawWave(g, c.width, c.height, a, b); views[id] = { g, a, b }; }
+  const c = $('seam'), g = setupCanvas(c), w = c.width, h = c.height, half = Math.floor(w / 2);
+  g.fillStyle = '#0d0a12'; g.fillRect(0, 0, w, h);
+  const sr = buf.sampleRate, d = buf.getChannelData(0), seg = (t0, t1, x0, x1, col) => { g.fillStyle = col; const spp = (t1 - t0) * sr / (x1 - x0);
+    for (let x = x0; x < x1; x++) { const a = Math.floor(t0 * sr + (x - x0) * spp), z = Math.floor(t0 * sr + (x - x0 + 1) * spp) + 1; let mn = 1, mx = -1;
+      for (let i = Math.max(0, a); i < Math.min(d.length, z); i++) { if (d[i] < mn) mn = d[i]; if (d[i] > mx) mx = d[i]; }
+      if (mx >= mn) g.fillRect(x, h / 2 - mx * h * 0.46, 1, Math.max(1, (mx - mn) * h * 0.46)); } };
+  seg(st.end - bar(), st.end, 0, half, '#ff9a9a'); seg(st.start, st.start + bar(), half, w, '#8cf0b6');
+  g.fillStyle = '#fff'; g.fillRect(half, 0, 1, h);
+  $('endLbl').textContent = `${fmt(st.end)} (${barTxt(st.end)})`;
+  $('startLbl').textContent = `${fmt(st.start)} (${barTxt(st.start)})`;
+  const L = st.end - st.start;
+  $('json').textContent = JSON.stringify(exportObj(), null, 1) + `\n${T('loopLen')}: ${fmt(L)} (${(L / bar()).toFixed(2)} ${T('barsUnit')})`;
+}
+function exportObj() {
+  const sr = buf.sampleRate;
+  return { file: fileName, sampleRate: sr, bpm: st.bpm, firstBeatSeconds: st.offset, beatsPerBar: st.bpb,
+    loopStartSeconds: +st.start.toFixed(4), loopEndSeconds: +st.end.toFixed(4), loopStartSample: Math.round(st.start * sr), loopEndSample: Math.round(st.end * sr), crossfadeMs: st.xf };
+}
+function drawPlayhead() {
+  requestAnimationFrame(drawPlayhead);
+  if (!buf) return;
+  const p = nowPos();
+  $('pos').textContent = p == null ? '' : `${T('pos')} ${fmt(p)} (${barTxt(p)})`;
+  if (p == null) { if (drawPlayhead.was) { rerender(); drawPlayhead.was = false; } return; }
+  drawPlayhead.was = true;
+  for (const id of ['ov', 'endView', 'startView']) { const v = views[id]; if (!v) continue; const c = $(id);
+    drawWave(v.g, c.width, c.height, v.a, v.b);
+    if (p >= v.a && p <= v.b) { v.g.fillStyle = '#fff'; v.g.fillRect((p - v.a) / (v.b - v.a) * c.width, 0, 2, c.height); } }
+}
+requestAnimationFrame(drawPlayhead);
+
+// ---------- marker interaction (pointer events: mouse, pen and touch) ----------
+function attachDrag(id) {
+  const c = $(id); let drag = null;
+  const tAt = e => { const r = c.getBoundingClientRect(), v = views[id]; return v.a + (e.clientX - r.left) / r.width * (v.b - v.a); };
+  c.addEventListener('pointerdown', e => {
+    if (!buf) return; const t = tAt(e), v = views[id], tol = (e.pointerType === 'touch' ? 22 : 8) / c.getBoundingClientRect().width * (v.b - v.a);
+    if (id === 'endView') drag = 'end'; else if (id === 'startView') drag = 'start';
+    else if (Math.abs(t - st.end) < tol) drag = 'end'; else if (Math.abs(t - st.start) < tol) drag = 'start';
+    if (!drag) { startAt(t); return; }
+    c.setPointerCapture(e.pointerId); move(e);
+  });
+  const move = e => { if (!drag) return; const t = snap(tAt(e));
+    if (drag === 'start') st.start = clamp(t, 0, st.end - beat()); else st.end = clamp(t, st.start + beat(), buf.duration);
+    syncInputs(); rerender(); };
+  c.addEventListener('pointermove', move);
+  const up = () => { if (drag) { drag = null; changed(); } };
+  c.addEventListener('pointerup', up); c.addEventListener('pointercancel', up);
+}
+['ov', 'endView', 'startView'].forEach(attachDrag);
+document.querySelectorAll('button[data-m]').forEach(b => b.onclick = () => {
+  if (!buf) return; const d = b.dataset.d, sgn = d.startsWith('-') ? -1 : 1, u = d.replace('-', '');
+  const step = u === 'bar' ? bar() : u === 'beat' ? beat() : +u;
+  if (b.dataset.m === 'start') st.start = clamp(st.start + sgn * step, 0, st.end - beat()); else st.end = clamp(st.end + sgn * step, st.start + beat(), buf.duration);
+  changed(); });
+document.querySelectorAll('.snap').forEach(b => b.onclick = () => { st.snap = b.dataset.s; document.querySelectorAll('.snap').forEach(x => x.classList.toggle('on', x === b)); if (buf) store.set(key(), st); });
+
+// ---------- inputs ----------
+function syncInputs() { $('bpm').value = st.bpm; $('offset').value = st.offset; $('bpb').value = st.bpb; $('xf').value = st.xf; $('startNum').value = st.start.toFixed(3); $('endNum').value = st.end.toFixed(3);
+  document.querySelectorAll('.snap').forEach(x => x.classList.toggle('on', x.dataset.s === st.snap)); }
+function changed() { syncInputs(); rerender(); if (buf) store.set(key(), st); if (play) { const p = nowPos(); startAt(p > st.end - 0.05 ? st.start : p); } }
+$('bpm').onchange = e => { st.bpm = +e.target.value || st.bpm; changed(); };
+$('offset').onchange = e => { st.offset = +e.target.value; changed(); };
+$('bpb').onchange = e => { st.bpb = +e.target.value; changed(); };
+$('xf').onchange = e => { st.xf = Math.max(0, +e.target.value); changed(); };
+$('startNum').onchange = e => { if (buf) { st.start = clamp(+e.target.value, 0, st.end - 0.01); changed(); } };
+$('endNum').onchange = e => { if (buf) { st.end = clamp(+e.target.value, st.start + 0.01, buf.duration); changed(); } };
+$('autoTempo').onclick = async () => { if (!buf) return; if (!analysis) await analyze(); autoTempo(); changed(); };
+$('autoLoop').onclick = async () => { if (!buf) return; $('cands').textContent = T('searching'); if (!analysis) await analyze(); await new Promise(r => setTimeout(r)); autoLoop(); };
+window.addEventListener('resize', () => rerender());
+
+// ---------- export ----------
+function wav(channels, sr) {
+  const n = channels[0].length, nc = channels.length, ab = new ArrayBuffer(44 + n * nc * 2), v = new DataView(ab);
+  const w = (o, s) => [...s].forEach((ch, i) => v.setUint8(o + i, ch.charCodeAt(0)));
+  w(0, 'RIFF'); v.setUint32(4, 36 + n * nc * 2, true); w(8, 'WAVE'); w(12, 'fmt '); v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, nc, true);
+  v.setUint32(24, sr, true); v.setUint32(28, sr * nc * 2, true); v.setUint16(32, nc * 2, true); v.setUint16(34, 16, true); w(36, 'data'); v.setUint32(40, n * nc * 2, true);
+  let o = 44; for (let i = 0; i < n; i++) for (let c = 0; c < nc; c++) { v.setInt16(o, clamp(channels[c][i], -1, 1) * 32767, true); o += 2; }
+  return new Blob([ab], { type: 'audio/wav' });
+}
+function download(blob, name) { const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name; document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000); }
+const base = () => fileName.replace(/\.[^.]+$/, '');
+$('exportWav').onclick = () => { if (!buf) return; buildRendered(); const sr = buf.sampleRate, ia = Math.round(st.start * sr), ib = Math.round(st.end * sr);
+  const ch = c => rendered.getChannelData(c), n = rendered.numberOfChannels;
+  download(wav([...Array(n)].map((_, c) => ch(c).slice(0, ia)), sr), base() + '_intro.wav');
+  setTimeout(() => download(wav([...Array(n)].map((_, c) => ch(c).slice(ia, ib)), sr), base() + '_loop.wav'), 400); };
+$('exportJson').onclick = () => { if (buf) download(new Blob([JSON.stringify(exportObj(), null, 1)], { type: 'application/json' }), base() + '_loop.json'); };
+$('copyJson').onclick = async () => { if (!buf) return; try { await navigator.clipboard.writeText(JSON.stringify(exportObj(), null, 1)); $('status').textContent = T('copied'); } catch (e) { $('status').textContent = T('copyFail'); } };
+
+applyLang();
+</script>
+</body>
+</html>
